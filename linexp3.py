@@ -164,7 +164,7 @@ if __name__ == "__main__":
         rewards_per_round.append(total_reward / (t + 1))
         regret_per_round.append(total_regret)
 
-    # Plotting
+    # Plot
     plt.figure(figsize=(12, 5))
 
     # Average reward
