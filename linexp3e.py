@@ -2,10 +2,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-class LinEXP3:
+class LinEXP3E:
     """
-    Implementation of the RealLinEXP3 (Realizable Linear Exponential-weight algorithm for Exploration and Exploitation) algorithm
-    for the adversarial multi-armed bandit problem.
+    Implementation of the modified RealLinEXP3 (Realizable Linear Exponential-weight algorithm for Exploration and Exploitation) algorithm
+    to minimize cumulative regret while maintaining accure ATE estimation using forced expoloration.
 
     Parameters:
     -----------
@@ -68,9 +68,9 @@ class LinEXP3:
         arm = np.random.choice(self.n_arms, p=probs)
 
         # If a is suboptimal:
-          probs = (1-self.alpha) * weights / np.sum(weights) + (self.alpha / self.n_arms)
+        probs[a] = (1-self.alpha) * weights[a] / np.sum(weights[a]) + (self.alpha / self.n_arms)
         # Else: 
-          probs = (1-self.gamma) * weights / np.sum(weights) + (self.gamma / self.n_arms)
+        probs[a] = (1-self.gamma) * weights[a] / np.sum(weights[a]) + (self.gamma / self.n_arms)
 
         return arm
 
@@ -134,8 +134,8 @@ if __name__ == "__main__":
     # True unknown reward parameters (one per arm)
     true_theta = np.random.randn(n_arms, context_dim)
 
-    # Initialize LinEXP3 agent
-    agent = LinEXP3(n_arms=n_arms, gamma=gamma, context_dimension=context_dim, n_rounds=horizon)
+    # Initialize LinEXP3E agent
+    agent = LinEXP3E(n_arms=n_arms, gamma=gamma, context_dimension=context_dim, n_rounds=horizon)
 
     # Tracking performance
     total_reward = 0
