@@ -2,6 +2,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+main
 def realizable_estimator(context, reward, M, d, arm_index, policy_fn):
     """
     Implements Matrix Geometric Resampling (MGR) based realizable estimator from the Neu 2020 paper
@@ -35,6 +36,8 @@ def realizable_estimator(context, reward, M, d, arm_index, policy_fn):
     return Sigma_hat_plus @ context * reward # estimated reward vector theta_hat
 
 
+
+main
 class LinEXP3E:
     """
     Implementation of the modified RealLinEXP3 (Realizable Linear Exponential-weight algorithm for Exploration and Exploitation) algorithm
@@ -56,12 +59,21 @@ class LinEXP3E:
         Balance between regret minimization and ATE estimation accuracy (0 <= alpha <= 1)
     """
 
+main
     def __init__(self, n_arms, gamma, context_dimension, eta=None, n_rounds=None, true_theta=None):
         self.n_arms = n_arms
         self.gamma = gamma
         self.context_dimension = context_dimension
         self.true_theta = true_theta  # for computing ATE estimation error
 
+
+    def __init__(self, n_arms, gamma, context_dimension, eta=None, n_rounds=None):
+        self.n_arms = n_arms # Number of arms (K)
+        self.gamma = gamma # Exploration parameter
+        self.context_dimension = context_dimension
+
+        # Set learning rate if not provided
+main
         if eta is None:
             if n_rounds is None:
                 raise ValueError("If eta is not provided, n_rounds must be specified")
@@ -69,6 +81,7 @@ class LinEXP3E:
         else:
             self.eta = eta
 
+main
         self.reward_estimator = np.zeros((n_arms, context_dimension))
         self.ate_estimator = np.zeros((n_arms, context_dimension))
         
@@ -189,11 +202,104 @@ class LinEXP3E:
         return errors
     
 
+
+        # Set reward vector
+        self.reward_estimator = np.zeros((n_arms, context_dimension)) # Shape (K, d)
+
+        # Set policies
+        probs = (1-self.gamma) * weights / np.sum(weights) + (self.gamma / self.n_arms)
+
+
+    def get_weights(self, context):
+        """
+        Observe the current context vector (X_t) and for all a, set weights
+        """
+        scores = np.array([
+            np.dot(context, self.reward_estimator[a]) for a in range(self.n_arms)
+        ])
+
+        weights = np.exp(self.eta * scores)
+
+        return weights
+
+
+    def draw_action(self, context):
+        """
+        Draw an arm (A_t) from the policy based on pi(a|X_t)
+        """
+        weights = self.get_weights(context)
+        
+        self.last_context = context
+        self.last_probs = probs
+      
+        arm = np.random.choice(self.n_arms, p=probs)
+
+        # If a is suboptimal:
+        probs[a] = (1-self.alpha) * weights[a] / np.sum(weights[a]) + (self.alpha / self.n_arms)
+        # Else: 
+        probs[a] = (1-self.gamma) * weights[a] / np.sum(weights[a]) + (self.gamma / self.n_arms)
+
+        return arm
+
+
+    def update_real_lin_exp3_reward_estimator(self,context,M,arm,reward):
+        """
+        Return reward estimator based on current context and arm.
+
+        Parameters
+        ----------
+        context : np.ndarray
+            Context vector observed at current round.
+        M : int
+            Number of resampling iterations.
+        arm : int
+            Action selected by the agent.
+        reward : float
+            Observed reward for the selected action.
+        """
+        # Matrix Geometrix Resampling
+        d = self.context_dimension
+        beta = 1 / (2 * np.linalg.norm(context)**2)
+        I = np.eye(d)
+        A_k = I
+        Sigma_hat_plus = beta * I
+
+        for k in range(M):
+            # draw context matrix from D
+            x_k = np.random.randn(d)
+
+            # select action from probs
+            a_k = self.draw_action(x_k)
+
+
+            if a_k == arm:
+                # compute B_k,a
+                B_k = np.outer(x_k, x_k)
+
+                # compute A_k,a
+                A_k = A_k @ (I - beta * B_k)
+
+                # return MGR estimator
+                Sigma_hat_plus += beta * A_k
+
+
+        # calculate reward estimator
+        reward_estimator = Sigma_hat_plus @ context * reward
+        self.reward_estimator[arm] += reward_estimator
+
+        # return reward estimator
+        return reward_estimator
+
+main
 if __name__ == "__main__":
     # Parameters
     n_arms = 5
     context_dim = 10
+main
     gamma = 0.01
+=======
+    gamma = 0.1
+main
     horizon = 1000
     M = 10  # MGR samples
 
@@ -201,6 +307,7 @@ if __name__ == "__main__":
     true_theta = np.random.randn(n_arms, context_dim)
 
     # Initialize LinEXP3E agent
+main
     # Initialize LinEXP3E agent
     agent = LinEXP3E(
         n_arms=n_arms,
@@ -210,11 +317,15 @@ if __name__ == "__main__":
         true_theta=true_theta  # <-- this must be here!
     )
 
+    agent = LinEXP3E(n_arms=n_arms, gamma=gamma, context_dimension=context_dim, n_rounds=horizon)
+main
+
     # Tracking performance
     total_reward = 0
     total_regret = 0
     rewards_per_round = []
     regret_per_round = []
+main
     ate_errors_per_round = []
 
     for t in range(horizon):
@@ -234,12 +345,32 @@ if __name__ == "__main__":
         agent.update_real_lin_exp3_reward_estimator(context, M=M, arm=arm, reward=reward, t=t)
         # agent.update_real_lin_exp3_reward_estimator(context, M=M, arm=arm, reward=reward)
 
+
+    for t in range(horizon):
+        # Generate random context (from D ~ N(0, I))
+        context = np.random.randn(context_dim)
+
+        # Choose action
+        arm = agent.draw_action(context)
+
+        # Compute reward from true linear model + noise
+        reward = np.dot(true_theta[arm], context) + np.random.normal(0, 0.1)  # noise std = 0.1
+
+        # Compute optimal reward for regret tracking
+        optimal_reward = np.max([np.dot(theta, context) for theta in true_theta])
+        regret = optimal_reward - reward
+
+        # Update LinEXP3
+        agent.update_real_lin_exp3_reward_estimator(context, M=M, arm=arm, reward=reward)
+main
+
         # Track performance
         total_reward += reward
         total_regret += regret
         rewards_per_round.append(total_reward / (t + 1))
         regret_per_round.append(total_regret)
 
+main
         # ATE estimation error
         ate_errors = agent.get_ate_errors()
         if ate_errors is not None:
@@ -248,6 +379,7 @@ if __name__ == "__main__":
             
         print(f"Round {t}, Mean ATE Error: {mean_ate_error}")
 
+main
     # Plot
     plt.figure(figsize=(12, 5))
 
@@ -269,6 +401,7 @@ if __name__ == "__main__":
 
     plt.tight_layout()
     plt.show()
+main
 
     # ATE Estimation Error
     plt.figure(figsize=(6, 4))
@@ -279,3 +412,5 @@ if __name__ == "__main__":
     plt.grid(True)
     plt.tight_layout()
     plt.show()
+
+ main
