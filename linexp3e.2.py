@@ -61,32 +61,30 @@ class LinEXP3E:
         weights = np.exp(self.eta * scores)
 
         return weights
-
-
-    def draw_action(self, context):
-        """
-        Draw an arm (A_t) from the policy based on pi(a|X_t) using context
-        """
-        weights = self.get_weights(context)
-        # Dessa: exp3 style distribution, no softmax
-        # Lucy: I believe this is already the softmax. It pulls the weights (which are already exponentiated via get_weights) and normalizes them
-        probs = (1-self.gamma) * weights / np.sum(weights) + (self.gamma / self.n_arms)
-
-        arm = int(np.random.choice(self.n_arms, p=probs))
-
-        # Return chosen arm and observe its probability distribution given context
-        return arm
     
     def get_action_probs(self, context):
         """
         Return softmax probabilities over contextual scores since get_weights gives exponentiated scores.
         Returns all probabilities for each arm in a single array.
+        Uses the same policy given in LinEXP3.
         """
 
         weights = self.get_weights(context)
-        probs = weights / np.sum(weights)
+        probs = (1-self.gamma) * weights / np.sum(weights) + (self.gamma / self.n_arms)
         return probs
     
+    def draw_action(self, context):
+        """
+        Draw an arm (A_t) from the policy based on pi(a|X_t) using context
+        """
+        # Dessa: exp3 style distribution, no softmax
+        # Lucy: I believe this is already the softmax. It pulls the weights (which are already exponentiated via get_weights) and normalizes them
+        probs = self.get_action_probs(context)
+
+        arm = int(np.random.choice(self.n_arms, p=probs))
+
+        # Return chosen arm and observe its probability distribution given context
+        return arm
 
     def get_action_probability(self, context, arm):
         """
