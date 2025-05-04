@@ -53,7 +53,6 @@ class LinEXP3E:
         """
         Observe the current context vector (X_t) and for all a, set weights
         """
-        # Lucy: Does this need to be for t-1 for the current context?
         scores = np.array([
             np.dot(context, self.reward_estimator[a]) for a in range(self.n_arms)
         ])
@@ -75,15 +74,10 @@ class LinEXP3E:
     
     def draw_action(self, context):
         """
-        Draw an arm (A_t) from the policy based on pi(a|X_t) using context
+        Draw an arm (A_t) using the policy (π) for context (x_t)
         """
-        # Dessa: exp3 style distribution, no softmax
-        # Lucy: I believe this is already the softmax. It pulls the weights (which are already exponentiated via get_weights) and normalizes them
         probs = self.get_action_probs(context)
-
         arm = int(np.random.choice(self.n_arms, p=probs))
-
-        # Return chosen arm and observe its probability distribution given context
         return arm
 
     def get_action_probability(self, context, arm):
@@ -93,6 +87,43 @@ class LinEXP3E:
         """
         return self.get_action_probs(context)[arm]
     
+    def matrix_geometric_resampling(self, context, M):
+        """
+        Matrix Geometric Resampling (MGR) for estimating the reward function.
+        This is a placeholder function and should be implemented based on the
+        specific MGR algorithm used in the paper.
+
+        Parameters
+        ----------
+        context : np.ndarray
+            Context vector observed at current round.
+        M : int
+            Number of resampling iterations.
+        """
+        d = self.context_dimension
+        Beta = 1 / (2 * np.linalg.norm(context)**2)
+        I = np.eye(d)
+        A_k = I
+        Sigma_inv_est = Beta * I
+
+        for k in range(M):
+            # draw context matrix from D
+            x_k = np.random.randn(d)
+
+            # select action from probs using context matrix
+            a_k = self.draw_action(x_k)
+
+            if a_k == arm:
+                # compute B_k,a
+                B_k = np.outer(x_k, x_k)
+
+                # compute A_k,a
+                A_k = A_k @ (I - Beta * B_k)
+
+                # return MGR estimator (context-aware covariance estimate)
+                Sigma_inv_est += Beta * A_k
+
+        return Sigma_inv_est
 
     def update_real_lin_exp3_reward_estimator(self,context,M,arm,reward):
         """
@@ -109,32 +140,11 @@ class LinEXP3E:
         reward : float
             Observed reward for the selected action.
         """
-        # Matrix Geometrix Resampling
-        d = self.context_dimension
-        beta = 1 / (2 * np.linalg.norm(context)**2)
-        I = np.eye(d)
-        A_k = I
-        Sigma_hat_plus = beta * I
+        inv_cov_matrix_est = self.matrix_geometric_resampling(self, context, M)
 
-        for k in range(M):
-            # draw context matrix from D
-            x_k = np.random.randn(d)
-
-            # select action from probs using context matrix
-            a_k = self.draw_action(x_k)
-
-            if a_k == arm:
-                # compute B_k,a
-                B_k = np.outer(x_k, x_k)
-
-                # compute A_k,a
-                A_k = A_k @ (I - beta * B_k)
-
-                # return MGR estimator (context-aware covariance estimate)
-                Sigma_hat_plus += beta * A_k
 
         # Calculate reward estimator using context just learned
-        reward_estimator = Sigma_hat_plus @ context * reward
+        reward_estimator = inv_cov_matrix_est @ context * reward
         self.reward_estimator[arm] += reward_estimator
 
         # Get probability for given arm given context
@@ -170,7 +180,7 @@ def plot_ate_convergence(agent):
     arm_pairs = [(a, b) for a in range(n_arms) for b in range(n_arms) if a != b]
 
     n_plots = len(arm_pairs)
-    n_cols = 3  # for width
+    n_cols = 3
     n_rows = math.ceil(n_plots / n_cols)
 
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(3 * n_cols, 1.25 * n_rows))
