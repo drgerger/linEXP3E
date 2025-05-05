@@ -1,58 +1,61 @@
 # -*- coding: utf-8 -*-
-import sys
 import math
 import numpy as np
 import matplotlib.pyplot as plt
 
 class LinEXP3E:
     """
-    Implementation of the RealLinEXP3 (Realizable Linear Exponential-weight algorithm for Exploration and Exploitation) algorithm
-    for the adversarial multi-armed bandit problem with additions for ATE (Average Treatment Effect) estimation.
-
+    Implementation of the RealLinEXP3 algorithm for adversarial contextual bandits 
+    with Average Treatment Effect (ATE) estimation.
+    
     Parameters:
     -----------
     n_arms : int
-        Number of arms/actions
+        Number of arms/actions (K > 0)
     gamma : float
-        Exploration parameter (0 <= gamma <= 1)
-    eta : float, optional
-        Learning rate. If None, it's set to sqrt(ln(n_arms)/(n_arms*T)) where T is n_rounds
-    n_rounds : int, optional
-        Number of rounds. Used to set eta if not provided explicitly
+        Exploration parameter in [0, 1]
     context_dimension : int
-        Context dimension
+        Dimension of the context vectors (d > 0)
+    eta : float, optional
+        Learning rate. If None, computed as sqrt(ln(K)/(KT))
+    n_rounds : int, optional
+        Number of rounds (T). Required if eta is None
     """
-
-    def __init__(self, n_arms, gamma, context_dimension, eta=None, n_rounds=None):
-        self.n_arms = n_arms # Number of arms (K)
-        self.gamma = gamma # Exploration parameter
+    def __init__(self, n_arms: int, gamma: float, context_dimension: int, 
+                 eta: float = None, n_rounds: int = None) -> None:
+        # Validate inputs
+        if n_arms <= 0 or context_dimension <= 0:
+            raise ValueError("n_arms and context_dimension must be positive")
+        if not 0 <= gamma <= 1:
+            raise ValueError("gamma must be in [0, 1]")
+            
+        self.n_arms = n_arms
+        self.gamma = gamma
         self.context_dimension = context_dimension
-        self.reward_estimator_IPW = {a: [] for a in range(self.n_arms)} # list of individual IPW reward values per round
+        
+        # Initialize estimators and statistics
+        self.reward_estimator = np.zeros((n_arms, context_dimension))  # θ_t for each arm
+        self.reward_estimator_IPW = {a: [] for a in range(n_arms)}  # IPW rewards history
+        self.cumulative_rewards = np.zeros(n_arms)  # R_hat in the paper
+        
+        # ATE tracking matrix: arm a vs arm b
         self.ATE_matrix = {
-            a: {b: [] for b in range(self.n_arms) if b != a}
-            for a in range(self.n_arms)
+            a: {b: [] for b in range(n_arms) if b != a}
+            for a in range(n_arms)
         }
 
-        self.R_hat = np.zeros(self.n_arms) # running estimate of cumulative rewards per arm
-
-        # Set learning rate if not provided
+        # Set learning rate
         if eta is None:
-            if n_rounds is None:
-                raise ValueError("If eta is not provided, n_rounds must be specified")
-            if n_rounds <= 0:
-                raise ValueError("n_rounds must be greater than zero")
+            if n_rounds is None or n_rounds <= 0:
+                raise ValueError("n_rounds must be positive when eta is None")
             self.eta = np.sqrt(np.log(n_arms) / (n_arms * n_rounds))
         else:
+            if eta <= 0:
+                raise ValueError("eta must be positive")
             self.eta = eta
 
-        # Set reward vector
-        self.reward_estimator = np.zeros((n_arms, context_dimension)) # Shape (K, d)
-
-
-    def get_weights(self, context):
-        """
-        Observe the current context vector (X_t) and for all a, set weights
-        """
+    def get_weights(self, context: np.ndarray) -> np.ndarray:
+        """Calculate arm weights based on current context."""
         scores = np.array([
             np.dot(context, self.reward_estimator[a]) for a in range(self.n_arms)
         ])
@@ -60,19 +63,18 @@ class LinEXP3E:
         weights = np.exp(self.eta * scores)
 
         return weights
-    
-    def get_action_probs(self, context):
+
+    def get_action_probs(self, context: np.ndarray) -> np.ndarray:
         """
         Return softmax probabilities over contextual scores since get_weights gives exponentiated scores.
         Returns all probabilities for each arm in a single array.
         Uses the same policy given in LinEXP3.
         """
-
         weights = self.get_weights(context)
-        probs = (1-self.gamma) * weights / np.sum(weights) + (self.gamma / self.n_arms)
+        probs = (1 - self.gamma) * weights / np.sum(weights) + (self.gamma / self.n_arms)
         return probs
-    
-    def draw_action(self, context):
+
+    def draw_action(self, context: np.ndarray) -> int:
         """
         Draw an arm (A_t) using the policy (π) for context (x_t)
         """
@@ -80,52 +82,49 @@ class LinEXP3E:
         arm = int(np.random.choice(self.n_arms, p=probs))
         return arm
 
-    def get_action_probability(self, context, arm):
+    def get_action_probability(self, context: np.ndarray, arm: int) -> float:
         """
         Wrapper function to return π(a | x_t) for a given context and arm,
         using the same policy as draw_action (EXP3-style with gamma smoothing).
         """
         return self.get_action_probs(context)[arm]
-    
-    def matrix_geometric_resampling(self, context, M):
-        """
-        Matrix Geometric Resampling (MGR) for estimating the reward function.
-        This is a placeholder function and should be implemented based on the
-        specific MGR algorithm used in the paper.
 
-        Parameters
-        ----------
-        context : np.ndarray
-            Context vector observed at current round.
-        M : int
-            Number of resampling iterations.
+    def matrix_geometric_resampling(self, context: np.ndarray, M: int, arm: int) -> np.ndarray:
+        """
+        Perform Matrix Geometric Resampling to estimate inverse covariance matrix.
+        
+        Args:
+            context: Current context vector x_t
+            M: Number of resampling iterations
+            arm: Target arm for estimation
+            
+        Returns:
+            Estimated inverse covariance matrix
         """
         d = self.context_dimension
-        Beta = 1 / (2 * np.linalg.norm(context)**2)
-        I = np.eye(d)
-        A_k = I
-        Sigma_inv_est = Beta * I
+        context_norm = np.linalg.norm(context)
+        
+        # Avoid numerical instability
+        epsilon = 1e-10
+        beta = 1.0 / (2 * max(context_norm**2, epsilon))
+        
+        identity = np.eye(d)
+        A_current = identity.copy()
+        Sigma_inv_est = beta * identity
 
-        for k in range(M):
-            # draw context matrix from D
-            x_k = np.random.randn(d)
-
-            # select action from probs using context matrix
-            a_k = self.draw_action(x_k)
-
-            if a_k == arm:
-                # compute B_k,a
-                B_k = np.outer(x_k, x_k)
-
-                # compute A_k,a
-                A_k = A_k @ (I - Beta * B_k)
-
-                # return MGR estimator (context-aware covariance estimate)
-                Sigma_inv_est += Beta * A_k
+        for _ in range(M):
+            # Sample random context and action
+            context_sample = np.random.randn(d)
+            action = self.draw_action(context_sample)
+            
+            if action == arm:
+                outer_product = np.outer(context_sample, context_sample)
+                A_current = A_current @ (identity - beta * outer_product)
+                Sigma_inv_est += beta * A_current
 
         return Sigma_inv_est
 
-    def update_real_lin_exp3_reward_estimator(self,context,M,arm,reward):
+    def update_real_lin_exp3_reward_estimator(self, context: np.ndarray, M: int, arm: int, reward: float) -> np.ndarray:
         """
         Return reward estimator based on current context and arm.
 
@@ -139,43 +138,42 @@ class LinEXP3E:
             Action selected by the agent.
         reward : float
             Observed reward for the selected action.
+
+        Returns
+        -------
+        np.ndarray
+            Updated reward estimator
         """
-        inv_cov_matrix_est = self.matrix_geometric_resampling(self, context, M)
+        inv_cov_matrix_est = self.matrix_geometric_resampling(context, M, arm)
 
-
-        # Calculate reward estimator using context just learned
+        # Update reward estimator using inverse covariance matrix estimate
         reward_estimator = inv_cov_matrix_est @ context * reward
         self.reward_estimator[arm] += reward_estimator
 
-        # Get probability for given arm given context
+        # Calculate inverse propensity weight (IPW)
         prob = self.get_action_probability(context, arm)
-       
-        # do IPW to adjust reward  based on how likely action was selected since we don't see reward of both arms at once
-        inv_propensity = 1.0 / max(prob, 1e-6) # 1/pi[arm]
-        ipw_reward = reward_estimator * inv_propensity # do IPW with contextual reward estimate
-        
-        # keep a running list to check convergence
-        self.reward_estimator_IPW[arm].append(ipw_reward) # list of individual IPW reward values per round, not contextual
+        inv_propensity = 1.0 / max(prob, 1e-6)  # Clipped IPW to avoid division by zero
 
-        for other_arm in range(self.n_arms): # loop through all other arms
-            if other_arm == arm: # other than just-pulled one
-                continue
-            if self.reward_estimator_IPW[other_arm]: # only if we have data for comparison
-                other_mean = np.mean(self.reward_estimator_IPW[other_arm]) # pull mean IPW reward for other arm
-                ate = ipw_reward - other_mean # compare it to reward of current arm
-                self.ATE_matrix[arm][other_arm].append(ate) # update ATE data structure accordingly
+        # Calculate IPW-adjusted reward estimate 
+        ipw_reward = float(np.mean(reward_estimator * inv_propensity))  # Convert to scalar
+        self.reward_estimator_IPW[arm].append(ipw_reward)
 
-        # return reward estimator
-        return reward_estimator # define another self.reward_estimator_IPW, compute all pairwise differences.
-        """
-        Vector of length k choose 2, each facilitates hypothesis testing that arm A versus arm A^ is 
-        better or worse for all pairs. If ATE converges to 0, reject null hypothesis.
-        attribute for IPW'd estimate (*1/pi[arm])
-        maintain data structure for ATE for all arms, expect each entry to converge to a constant.
-        """
+        # Update ATE estimates for all pairs
+        curr_arm_reward = ipw_reward
+        for other_arm in range(self.n_arms):
+            if other_arm != arm and self.reward_estimator_IPW[other_arm]:
+                other_arm_mean = float(np.mean(self.reward_estimator_IPW[other_arm]))
+                ATE = curr_arm_reward - other_arm_mean
+                self.ATE_matrix[arm][other_arm].append(ATE)
+
+        return reward_estimator
 
 
-def plot_ate_convergence(agent):
+def plot_ate_convergence(agent: LinEXP3E) -> None:
+    """
+    Visualize ATE convergence for all arm pairs over time.
+    Creates a grid of subplots showing running averages of ATE estimates.
+    """
     n_arms = agent.n_arms
     arm_pairs = [(a, b) for a in range(n_arms) for b in range(n_arms) if a != b]
 
@@ -184,13 +182,12 @@ def plot_ate_convergence(agent):
     n_rows = math.ceil(n_plots / n_cols)
 
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(3 * n_cols, 1.25 * n_rows))
-    axes = axes.flatten() # in case it is 2-D array
+    axes = axes.flatten()  # Ensure axes is always flat array
 
-    global_min = -1
-    global_max = 1
+    global_min, global_max = -1, 1
 
     for idx, (a, b) in enumerate(arm_pairs):
-        ates = agent.ATE_matrix[a][b]
+        ates = np.array(agent.ATE_matrix[a][b], dtype=float)
         if len(ates) > 0:
             running_avg = [np.mean(ates[:i+1]) for i in range(len(ates))]
             axes[idx].plot(running_avg)
@@ -203,7 +200,7 @@ def plot_ate_convergence(agent):
             axes[idx].set_xticks([])
             axes[idx].set_yticks([])
 
-    # hide any leftover empty subplots
+    # Hide empty subplots
     for j in range(idx + 1, len(axes)):
         axes[j].axis('off')
 
@@ -212,12 +209,13 @@ def plot_ate_convergence(agent):
 
 
 if __name__ == "__main__":
-    # Parameters
-    n_arms = 5
-    context_dim = 10
-    gamma = 0.1
-    horizon = 1000
-    M = 10  # MGR samples
+    # Simulation parameters
+    n_arms = 5  # Number of treatment arms
+    context_dim = 10  # Feature dimension
+    gamma = 0.1  # Exploration factor
+    horizon = 1000  # Time horizon T
+    M = 10  # MGR iterations
+    noise_std = 0.1  # Standard deviation of reward noise
 
     # True unknown reward parameters (one per arm)
     true_theta = np.random.randn(n_arms, context_dim)
@@ -231,34 +229,27 @@ if __name__ == "__main__":
     rewards_per_round = []
     regret_per_round = []
 
+    # Run simulation
     for t in range(horizon):
-        # Generate random context (from D ~ N(0, I))
-        
         context = np.random.randn(context_dim)
-
-        # Choose action
         arm = agent.draw_action(context)
-        # print(arm)
 
-        # Compute reward from true linear model + noise
-        reward = np.dot(true_theta[arm], context) + np.random.normal(0, 0.1)  # noise std = 0.1
-
-        # Compute optimal reward for regret tracking
+        # Compute true reward and noise
+        reward = np.dot(true_theta[arm], context) + np.random.normal(0, noise_std)
         optimal_reward = np.max([np.dot(theta, context) for theta in true_theta])
         regret = optimal_reward - reward
 
-        # Update LinEXP3
+        # Update agent and track metrics
         agent.update_real_lin_exp3_reward_estimator(context, M=M, arm=arm, reward=reward)
-
-        # Track performance
         total_reward += reward
         total_regret += regret
-        
         rewards_per_round.append(total_reward / (t + 1))
         regret_per_round.append(total_regret)
-        avg_regret_per_round = [r / (t+1) for t, r in enumerate(regret_per_round)]
 
+    # Plot results
     plot_ate_convergence(agent)
+
+    plt.figure(figsize=(12, 4))
 
     # Average reward
     plt.subplot(1, 2, 1)
