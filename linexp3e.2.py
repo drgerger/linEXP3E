@@ -20,9 +20,16 @@ class LinEXP3E:
         Learning rate. If None, computed as sqrt(ln(K)/(KT))
     n_rounds : int, optional
         Number of rounds (T). Required if eta is None
+    random_seed : int, optional
+        Random seed for reproducibility
     """
     def __init__(self, n_arms: int, gamma: float, context_dimension: int, 
-                 eta: float = None, n_rounds: int = None) -> None:
+                 use_IPW: bool = True, eta: float = None, n_rounds: int = None,
+                 random_seed: int = None) -> None:
+        # Set random seed if provided
+        if random_seed is not None:
+            np.random.seed(random_seed)
+            
         # Validate inputs
         if n_arms <= 0 or context_dimension <= 0:
             raise ValueError("n_arms and context_dimension must be positive")
@@ -32,6 +39,7 @@ class LinEXP3E:
         self.n_arms = n_arms
         self.gamma = gamma
         self.context_dimension = context_dimension
+        self.use_IPW = use_IPW
         
         # Initialize estimators and statistics
         self.reward_estimator = np.zeros((n_arms, context_dimension))  # θ_t for each arm
@@ -144,18 +152,27 @@ class LinEXP3E:
         np.ndarray
             Updated reward estimator
         """
-        inv_cov_matrix_est = self.matrix_geometric_resampling(context, M, arm)
 
-        # Update reward estimator using inverse covariance matrix estimate
-        reward_estimator = inv_cov_matrix_est @ context * reward
-        self.reward_estimator[arm] += reward_estimator
+        # Calculate inverse covariance matrix estimate using MGR
+        inv_cov_matrix_est = self.matrix_geometric_resampling(context, M, arm)
 
         # Calculate inverse propensity weight (IPW)
         prob = self.get_action_probability(context, arm)
         inv_propensity = 1.0 / max(prob, 1e-6)  # Clipped IPW to avoid division by zero
 
+        # Update reward estimator using inverse covariance matrix estimate
+        reward_estimator = inv_cov_matrix_est @ context * reward
+
+        # Create reward estimator with IPW adjustment
+        ipw_reward_estimator = reward_estimator * inv_propensity
+
+        if self.use_IPW:
+            self.reward_estimator[arm] += ipw_reward_estimator
+        else:
+            self.reward_estimator[arm] += reward_estimator
+
         # Calculate IPW-adjusted reward estimate 
-        ipw_reward = float(np.mean(reward_estimator * inv_propensity))  # Convert to scalar
+        ipw_reward = float(np.mean(ipw_reward_estimator))  # Convert to scalar
         self.reward_estimator_IPW[arm].append(ipw_reward)
 
         # Update ATE estimates for all pairs
@@ -167,7 +184,6 @@ class LinEXP3E:
                 self.ATE_matrix[arm][other_arm].append(ATE)
 
         return reward_estimator
-
 
 def plot_ate_convergence(agent: LinEXP3E) -> None:
     """
@@ -209,6 +225,9 @@ def plot_ate_convergence(agent: LinEXP3E) -> None:
 
 
 if __name__ == "__main__":
+    # Set random seed for reproducibility
+    np.random.seed(42)
+    
     # Simulation parameters
     n_arms = 5  # Number of treatment arms
     context_dim = 10  # Feature dimension
@@ -221,7 +240,7 @@ if __name__ == "__main__":
     true_theta = np.random.randn(n_arms, context_dim)
 
     # Initialize LinEXP3 agent
-    agent = LinEXP3E(n_arms=n_arms, gamma=gamma, context_dimension=context_dim, n_rounds=horizon)
+    agent = LinEXP3E(n_arms=n_arms, gamma=gamma, context_dimension=context_dim, n_rounds=horizon, use_IPW=False)
 
     # Tracking performance
     total_reward = 0
