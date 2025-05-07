@@ -198,6 +198,8 @@ def plot_ate_convergence(agent: LinEXP3E) -> None:
     n_rows = math.ceil(n_plots / n_cols)
 
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(3 * n_cols, 1.25 * n_rows))
+    ipw_status = "with IPW" if agent.use_IPW else "without IPW"
+    fig.suptitle(f"ATE Convergence {ipw_status}", y=1.02)
     axes = axes.flatten()  # Ensure axes is always flat array
 
     global_min, global_max = -1, 1
@@ -229,61 +231,81 @@ if __name__ == "__main__":
     np.random.seed(42)
     
     # Simulation parameters
-    n_arms = 5  # Number of treatment arms
-    context_dim = 10  # Feature dimension
-    gamma = 0.1  # Exploration factor
-    horizon = 1000  # Time horizon T
-    M = 10  # MGR iterations
-    noise_std = 0.1  # Standard deviation of reward noise
+    n_arms = 5
+    context_dim = 10
+    gamma = 0.1
+    horizon = 1000
+    M = 10
+    noise_std = 0.1
 
     # True unknown reward parameters (one per arm)
     true_theta = np.random.randn(n_arms, context_dim)
 
-    # Initialize LinEXP3 agent
-    agent = LinEXP3E(n_arms=n_arms, gamma=gamma, context_dimension=context_dim, n_rounds=horizon, use_IPW=False)
+    # Run simulations for both IPW and non-IPW
+    results = {}
+    for use_ipw in [True, False]:
+        # Initialize agent
+        agent = LinEXP3E(n_arms=n_arms, gamma=gamma, context_dimension=context_dim, 
+                        n_rounds=horizon, use_IPW=use_ipw)
 
-    # Tracking performance
-    total_reward = 0
-    total_regret = 0
-    rewards_per_round = []
-    regret_per_round = []
+        # Tracking performance
+        total_reward = 0
+        total_regret = 0
+        rewards_per_round = []
+        regret_per_round = []
 
-    # Run simulation
-    for t in range(horizon):
-        context = np.random.randn(context_dim)
-        arm = agent.draw_action(context)
+        # Run simulation
+        for t in range(horizon):
+            context = np.random.randn(context_dim)
+            arm = agent.draw_action(context)
 
-        # Compute true reward and noise
-        reward = np.dot(true_theta[arm], context) + np.random.normal(0, noise_std)
-        optimal_reward = np.max([np.dot(theta, context) for theta in true_theta])
-        regret = optimal_reward - reward
+            # Compute true reward and noise
+            reward = np.dot(true_theta[arm], context) + np.random.normal(0, noise_std)
+            optimal_reward = np.max([np.dot(theta, context) for theta in true_theta])
+            regret = optimal_reward - reward
 
-        # Update agent and track metrics
-        agent.update_real_lin_exp3_reward_estimator(context, M=M, arm=arm, reward=reward)
-        total_reward += reward
-        total_regret += regret
-        rewards_per_round.append(total_reward / (t + 1))
-        regret_per_round.append(total_regret)
+            # Update agent and track metrics
+            agent.update_real_lin_exp3_reward_estimator(context, M=M, arm=arm, reward=reward)
+            total_reward += reward
+            total_regret += regret
+            rewards_per_round.append(total_reward / (t + 1))
+            regret_per_round.append(total_regret)
 
-    # Plot results
-    plot_ate_convergence(agent)
+        # Store results
+        results[use_ipw] = {
+            'agent': agent,
+            'rewards': rewards_per_round,
+            'regret': regret_per_round
+        }
 
+    # Plot ATE convergence for both
+    plt.figure(figsize=(15, 5))
+    plt.subplot(1, 2, 1)
+    plot_ate_convergence(results[True]['agent'])
+    plt.subplot(1, 2, 2)
+    plot_ate_convergence(results[False]['agent'])
+
+    # Plot comparison of rewards and regret
     plt.figure(figsize=(12, 4))
 
-    # Average reward
+    # Average reward comparison
     plt.subplot(1, 2, 1)
-    plt.plot(rewards_per_round)
+    plt.plot(results[True]['rewards'], label='With IPW')
+    plt.plot(results[False]['rewards'], label='Without IPW')
     plt.title("Average Reward Over Time")
     plt.xlabel("Rounds")
     plt.ylabel("Average Reward")
+    plt.legend()
     plt.grid(True)
 
-    # Cumulative regret
+    # Cumulative regret comparison
     plt.subplot(1, 2, 2)
-    plt.plot(regret_per_round, color='red')
+    plt.plot(results[True]['regret'], label='With IPW')
+    plt.plot(results[False]['regret'], label='Without IPW')
     plt.title("Cumulative Regret Over Time")
     plt.xlabel("Rounds")
     plt.ylabel("Cumulative Regret")
+    plt.legend()
     plt.grid(True)
 
     plt.tight_layout()
