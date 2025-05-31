@@ -1,0 +1,38 @@
+# LaTeX auxiliary files
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+*.run.xml
+*.nav
+*.snm
+
+# PDF output
+*.pdf
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# VS Code settings (optional to ignore user-specific ones)
+.vscode/*.code-workspace
+.vscode/settings.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.ipynb_checkpoints
+
+# Environment files
+.env
+.venv/
+venv/
