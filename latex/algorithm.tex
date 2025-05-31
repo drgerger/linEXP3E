@@ -1,0 +1,324 @@
+
+\section{Algorithm Development}\label{sec:algorithm}
+
+This section introduces and develops the core algorithmic concepts underlying our work. We present a brief survey of the foundational algorithms in multi-armed bandits: EXP3, EXP3E, and LinEXP3. By understanding the capabilities and limitations of each algorithm, we show the need for a new algorithm that unifies regret minimization in adversarial settings with causal inference through Average Treatment Effect (ATE) estimation. Thus, this background sets the stage for our proposed model, LinEXP3E.
+
+First, we introduce EXP3 and its aim to minimize regret \ref{eq:regret}, 
+where $\mu_{a^*}$ is the optimal action in hindsight and $r_t$ is the action taken at time $t$, while balancing exploration and exploitation in the non-stochastic, or adversarial, bandit setting \citep{auer2002exp3}.
+
+Then, we introduce EXP3E and its addition of Average Treatment Effect (ATE) estimation with a two-phase procedure which quantifies the difference in expected outcomes between treatment and control arms. The Pareto optimality theorem for EXP3E formalizes the tradeoff between statistical power and regret minimization in the \textit{stochastic} bandit setting (Theorem 3.1, p. 7, \citealp{simchilevi2023adaptive}). Next, we examine LinEXP3, which extends EXP3’s adversarial framework to the adversarial \textit{linear contextual} setting by incorporating context vectors to determine rewards \citep{neu2020linear}. However, LinEXP3 lacks the affordances of EXP3E to estimate statistical power through ATE \ref{eq:ate} and does not offer a formal regret-statistical power tradeoff. Finally, moving past the constructive machinery, we present our new model which bridges these diverging branches of EXP3 to incorporate the benefits of EXP3E's ATE estimation \ref{eq:ate} in the linear contextual adversarial setting while retaining the regret minimization guarantees of LinEXP3 \ref{eq:regret}.
+
+
+\subsection{EXP3}\label{subsec:exp3}
+The EXP3 algorithm was developed by Auer et. al. \citep{auer2002exp3} to handle the non-stochastic, adversarial bandit problem. EXP3 stands for Exponential-weight algorithm for Exploration and Exploitation. The algorithm selects arms based on a probability distribution derived from assigned weights, balancing exploration and exploitation without assuming structure on the reward distributions. Regret scales as \(O(\sqrt{KT\ln K})\) \citep{auer2002exp3}. EXP3 is well-suited for environments with limited contextual information such as on social media, where there is a vast amount of novel content generated each second.
+
+In EXP3, we have the adversarial bandit setting \( \mathcal{A} = ({1, \dots, K}) \) with \(K\) arms. At each time step \(t \in ({1, \dots, T})\), the learner chooses arm \(a_t \in \mathcal{A}\). An adversary assigns a reward vector \(r_t = (r_t(1), \dots, r_t(K)) \in [0,1]^K\) but the learner can only observe the reward of the chosen arm \(r_t(a_t)\). The goal of the algorithm is to minimize regret compared to the best fixed arm in hindsight: \[R_T = \sum_{t=1}^T r_t(a^*) - \sum_{t=1}^T r_t(a_t)\]
+
+This kind of regret is often called external or sample path regret because it is defined on realized rewards: 
+\begin{equation}\label{eq:best_arm}
+a^* =  \text{argmax}_{a \in \mathcal{A}} \sum_{t=1}^T r_t(a)
+\end{equation}
+\citep{blum2007external}. Because rewards are adversarial and thus not assumed to follow a stochastic process, expectation over reward distributions is not involved in the EXP3 algorithm \citep{auer2002exp3}.
+
+The parameter \(\gamma\) controls exploration. As \(\gamma \rightarrow 0\), exploitation increases as the weights favor arms with high estimated rewards. Conversely, as \(\gamma \rightarrow 1\) exploration increases and reward decreases. \cite{auer2002exp3} show the optimal setting: 
+
+\begin{equation}\label{eq:gamma}
+\gamma = \min \left\{1, \sqrt{\frac{K \ln K}{(e-1)g}}\right\}
+\end{equation}
+
+With this optimal \(\gamma\), the regret is sublinear in \(T\):
+
+\begin{equation}\label{eq:exp3_sublinear}
+R_T = O(\sqrt{KT\ln K})
+\end{equation}
+
+which implies:
+
+\begin{equation}\label{eq:average_regret}
+\lim_{T \rightarrow \infty} \frac{R_T}{T} = 0
+\end{equation}
+
+\begin{algorithm} [H]
+\caption{\textbf{EXP3: Exponential-weight algorithm for Exploration and Exploitation}}
+\label{alg:EXP3}
+\textbf{Input:} \(\gamma\)
+\textbf{Initialization:} \( w_i(1) = 1 \) for \( i \in \{1, \dots, K\}, \gamma \in (0,1] \)
+\begin{algorithmic}[1]
+\For{$t = 1, 2, \dots, T$}
+    \State \( p_i(t) = (1 - \gamma) \frac{w_i(t)}{\sum_{j=1}^{K} w_j(t)} + \frac{\gamma}{K} \) for all \( i \in \{1, \dots, K\} \);
+    \State Sample \( i_t \sim p_i(t) \);
+    \State Observe reward \( x_{i_t}(t) \);
+    \For{$j = 1, \dots, K$}
+        \State \( \hat{x}_j(t) =
+        \begin{cases} 
+            \frac{x_j(t)}{p_j(t)}, & \text{if } j = i_t, \\ 
+            0, & \text{otherwise}.
+        \end{cases}
+        \)
+        \State \( w_j(t+1) = w_j(t) \exp\left( \frac{\gamma \hat{x}_j(t)}{K} \right) \);
+    \EndFor
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+EXP3 focuses only on selecting the best-performing arm over time. However, in some contexts it is important to measure the difference in expected rewards between actions. \cite{simchilevi2023adaptive} introduce the EXP3E algorithm, which extends the foundational principles of the EXP3 algorithm by incorporating mechanisms to estimate Average Treatment Effect (ATE) \ref{eq:ate}.
+
+\subsection{The EXP3E Algorithm}\label{subsec:exp3e}
+
+EXP3E is an adaption of EXP3 designed to balance two competing objectives: (i) minimizing regret in the stochastic multi-armed bandit setting and (ii) ensuring an accurate estimate of the ATE between arms \ref{eq:ate}. This balance is achieved through a two-phase approach and an additional forced exploration mechanism, \(\alpha \in [0,1].\) \(\alpha\) controls the balance between regret minimization  \ref{eq:regret} and ATE estimation accuracy  \ref{eq:ate}. A larger \(\alpha\) prioritizes regret minimization by reducing the selection of suboptimal arms. A smaller \(\alpha\) emphasizes accurate ATE estimation \ref{eq:ate} by maintaining exploration across all arms.
+This tradeoff is reflected in the regret and ATE estimation error rates:
+
+\begin{equation}\label{eq:exp3e_regret}
+R_T = O(\log T + T^{1-\alpha})
+\end{equation}
+
+\begin{equation}\label{eq:exp3e_error}
+e_T = O(T^{-\frac{1-\alpha}{2}})
+\end{equation}
+
+\(R_T\) is the cumulative regret after \(T\) rounds  \ref{eq:regret}, and \(e_T\) is the error in estimating the treatment effect. The trade-off is Pareto optimal in the sense that neither regret nor ATE error \ref{eq:ate} can be improved without degrading the other \citep{simchilevi2023adaptive}. The other input to EXP3E is $\delta$, representing the confidence level for eliminating arms, where a lower $\delta$ indicates higher confidence.
+
+The two phases of EXP3E are adaptive exploration and arm elimination (Phase 1), and forced exploration (Phase 2).
+
+In Phase 1, the goal is to identify the best arm through uniform exploration, using exponential weighting of estimated rewards to ensure sufficient sampling of all arms. In Phase 1, if \(|\mathcal{A}_t| > 1\), the estimated reward $\hat{R}_t(a)$ may be mapped into probabilities using exponential weighting:
+
+\begin{equation}\label{eq:exp3e_phase1_weights}
+\pi_t(a) = \frac{e^{\epsilon_{t-1} \hat{R}{t-1}(a)}}{\sum{a \in \mathcal{A}t} e^{\epsilon{t-1} \hat{R}_{t-1}(a)}}
+\end{equation}
+
+An arm is selected to be played according to the distribution \( \pi_t \), and a reward \( R_t \in [0,1] \) is observed. The cumulative reward estimates are updated accordingly. In Phase 1, only the suboptimal arms are eliminated. Any arms $a$ is removed if:
+
+\begin{equation}\label{eq:exp3e_elimination}
+\hat{R}_t^{\max} - \hat{R}_t(a) > 2 \sqrt{Ct}
+\end{equation}
+
+The set of active arms is updated accordingly. Phase 1 concludes when only one arm remains, i.e. all suboptimal arms have been eliminated. At this point, the algorithm transitions to Phase 2, where the optimal arm is prioritized:
+
+\begin{equation}\label{eq:exp3e_phase2_policy}
+\pi_t(a) =
+\begin{cases}
+1-(K-1)\alpha_t, & \text{if } a = a^* \\
+\alpha_t, & \text{otherwise}
+\end{cases}
+\end{equation}
+
+Suboptimal arms are still played with a controlled probability proportional to \(
+\alpha_t = \frac{1}{2t^\alpha}.
+\)
+\begin{algorithm} [H]
+\caption{\textbf{EXP3 with exploration}}
+\label{alg:EXP3E}
+\textbf{Input:} \( \alpha \) and \( \delta \)
+
+\textbf{Initialization:} \( \mathcal{A}_1 = \{1,2\} \), \( \hat{R}_0(a) = 0 \) for \( a \in \{1,2\} \), \\ 
+\hspace{2.5cm} \( \epsilon_0 = 0 \), \( C = 4(e^2 + 2)^2 (\log(2/\delta))^2 \)
+
+\begin{algorithmic}[1]
+\For{$t = 1,2, \dots, n$}
+    \State \( \epsilon_t = \frac{1}{\sqrt{Ct}}, \quad \alpha_t = \frac{1}{2t^\alpha} \);
+    \If{$|\mathcal{A}_t| = 2$} \Comment{Phase 1}
+        \State \( \pi_t(a) = \frac{e^{\epsilon_{t-1} \hat{R}_{t-1}(a)}}{e^{\epsilon_{t-1} \hat{R}_{t-1}(1)} + e^{\epsilon_t \hat{R}_{t-1}(2)}} \) for \( a \in \{1,2\} \);
+    \Else \Comment{Phase 2}
+        \State \( \pi_t(a) = 1 - \alpha_t \) if \( a \in \mathcal{A}_t \); otherwise \( \pi_t(a) = \alpha_t \);
+    \EndIf
+    \State Select \( A_t \) according to \( \pi_t \);
+    \State Observe reward \( R_t \);
+    \For{$a \in \{1,2\}$}
+        \State \( \hat{R}_t(a) = \hat{R}_{t-1}(a) + \frac{R_t}{\pi_t(a)} \mathbb{I}_{a = A_t} \);
+    \EndFor
+    \State \( \mathcal{A}_{t+1} = \mathcal{A}_t \setminus \{ a \in \mathcal{A}_t : \hat{R}_t^{\max} - \hat{R}_t(a) > 2\sqrt{Ct} \} \);
+    \State \textbf{Output:} \( \hat{\Delta}_t = \frac{1}{t} (\hat{R}_t(1) - \hat{R}_t(2)) \);
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+
+\begin{algorithm} [H]
+\caption{\textbf{EXP3E with exploration for} \( K = 2 \) \\ (\textbf{EXP3E})}
+\label{alg:EXP3E}
+\textbf{Input:} \( \alpha \) and \( \delta \)
+
+\textbf{Initialization:} \( \mathcal{A}_1 = \{1,2\} \), \( \hat{R}_0(a) = 0 \) for \( a \in \{1,2\} \), \\ 
+\hspace{2.5cm} \( \epsilon_0 = 0 \), \( C = 4(e^2 + 2)^2 (\log(2/\delta))^2 \)
+
+\begin{algorithmic}[1]
+\For{$t = 1,2, \dots, n$}
+    \State \( \epsilon_t = \frac{1}{\sqrt{Ct}}, \quad \alpha_t = \frac{1}{2t^\alpha} \);
+    \If{$|\mathcal{A}_t| = 2$} \Comment{Phase 1}
+        \State \( \pi_t(a) = \frac{e^{\epsilon_{t-1} \hat{R}_{t-1}(a)}}{e^{\epsilon_{t-1} \hat{R}_{t-1}(1)} + e^{\epsilon_t \hat{R}_{t-1}(2)}} \) for \( a \in \{1,2\} \);
+    \Else \Comment{Phase 2}
+        \State \( \pi_t(a) = 1 - \alpha_t \) if \( a \in \mathcal{A}_t \); otherwise \( \pi_t(a) = \alpha_t \);
+    \EndIf
+    \State Select \( A_t \) according to \( \pi_t \);
+    \State Observe reward \( R_t \);
+    \For{$a \in \{1,2\}$}
+        \State \( \hat{R}_t(a) = \hat{R}_{t-1}(a) + \frac{R_t}{\pi_t(a)} \mathbb{I}_{a = A_t} \);
+    \EndFor
+    \State \( \mathcal{A}_{t+1} = \mathcal{A}_t \setminus \{ a \in \mathcal{A}_t : \hat{R}_t^{\max} - \hat{R}_t(a) > 2\sqrt{Ct} \} \);
+    \State \textbf{Output:} \( \hat{\Delta}_t = \frac{1}{t} (\hat{R}_t(1) - \hat{R}_t(2)) \);
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+The ATE estimation for any pair of arms \( i, j \in \{1, \dots, K\} \) is the difference between the estimated mean rewards \ref{eq:ate}:
+\begin{equation}
+\hat{\Delta}_t^{(i,j)} = \frac{\hat{R}_t(i)}{t} - \frac{\hat{R}_t(j)}{t}
+\label{eq:ate_estimate}
+\end{equation}
+
+Thus, \( \hat{\Delta}_t^{(i,j)} \) is the final ATE estimate for any pair \( i, j \).
+
+The algorithm updates the cumulative reward estimates \( \hat{R}_t(a) \) using importance sampling with inverse propensity score weighting (IPW) to correct for the non-uniform selection probabilities over arms. \( A_t \in \mathcal{A}_t \) denotes the arm selected at time \( t \), with \( R_t \) as the observed reward. The reward estimate for each arm \( a \in \mathcal{A}_t \) is updated as:
+
+\begin{equation}
+\hat{R}t(a) = \hat{R}{t-1}(a) + \frac{R_t}{\pi_t(a)} \mathbf{1}{A_t = a}
+\label{eq:ipw_update}
+\end{equation}
+
+where \( \pi_t(a) \) is the probability of selecting arm \( a \) at time \( t \), and \( \mathbf{1}\{\cdot\} \) is the indicator function. IPW adjusts for the fact that some arms are selected more frequently than others, particularly as EXP3E transitions into Phase 2, where the optimal arm is prioritized, and suboptimal arms are selected with reduced probability:
+
+\begin{equation}
+\alpha_t = \frac{1}{2t^\alpha}
+\label{eq:alpha_decay}
+\end{equation}
+
+Without IPW, the reward estimates for under-sampled arms would become increasingly biased. IPW ensures that the reward estimates remain unbiased:
+
+\begin{equation}
+\mathbb{E}\left(\frac{R_t}{\pi_t(a)} \mathbf{1}{A_t = a}\right) = \mathbb{E}[R_t \mid A_t = a] = \mu_a
+\label{eq:ipw_unbiased}
+\end{equation}
+
+where \(
+\mu_a = \mathbb{E}[R_t \mid A_t = a]
+\) is the true mean reward of arm \( a \). \citep{carranza2023ipw} 
+
+This correction is especially important for average treatment effect (ATE) estimation \ref{eq:ate}, because accurate reward estimates are necessary to correctly estimate the difference in expected rewards between arms. In the EXP3E algorithm, IPW safeguards the validity of both reward estimation and ATE inference under non-uniform exploration-exploitation trade-offs.
+
+Like EXP3, EXP3E provides finite-sample bounds for regret  \ref{eq:regret} and ATE error  \ref{eq:ate}. Specifically:
+
+\begin{equation}
+R_T = O(n^{1-\alpha})
+\label{eq:exp3e_regret}
+\end{equation}
+
+\begin{equation}
+e_T = O\left(\frac{1}{\sqrt{n^{1-\alpha}}}\right)
+\label{eq:exp3e_ate_error}
+\end{equation}
+
+\subsection{Linear Contextual Bandits}\label{subsec:contextual}
+In the stochastic bandit problem, each arm has an unknown but fixed reward distribution where the reward from arm $a$ follows an independent probability distribution $P_a$ with unknown mean $\mu_a$. The linear contextual bandit problem extends the classic bandit setting by incorporating contextual information. Each arm \(a\) is associated with a context vector \(x_{t,a} \in \mathbb{R^{\textit{d}}}\).
+
+The expected reward is assumed to be a linear function of the context:
+
+\begin{equation}
+\mathbb{E}[r_t \mid a_t = a, x_{t,a}] = x_{t,a}^\top \theta^*
+\label{eq:contextual_reward}
+\end{equation}
+
+where \(\theta^* \in \mathbb{R}^\textit{d}\) is an unknown parameter vector \citep{neu2020linear}. The goal is to minimize regret with respect to the optimal policy that selects the arm with the highest expected reward given the context:
+\begin{equation}
+a_t^* = \arg\max_{a \in \mathcal{A}} x_{t,a}^\top \theta^*
+\label{eq:optimal_policy}
+\end{equation}
+The cumulative regret is defined as:
+\begin{equation}
+R_T = \sum_{t=1}^T \left(x_{t,a_t^*}^\top \theta^* - x_{t,a_t}^\top \theta^*\right)
+\end{equation}
+
+\subsection{ LINEXP3}\label{subsec:linexp3}
+LINEXP3 is an extension of the EXP3 algorithm for the adversarial linear contextual bandit setting. It is designed to handle the situation where the reward associated with each action depends on a context vector. The goal is to minimize regret  \ref{eq:regret} compared to the best fixed policy mapping contexts to actions. 
+
+As in EXP3, the setting begins with a set of arms \(\mathcal{A} = \{1, \dots, K\}\). However, for LINEXP3, the setting also includes context vectors \(X_t \in \mathbb{R}^d\), sampled i.i.d. from a known distribution, the reward vector \(\theta_{t,a} \in \mathbb{R}^d\), and the observed linear reward function:
+\begin{equation}
+r_t(X_t, A_t) = \langle X_t, \theta_{t, A_t} \rangle
+\label{eq:linexp3_reward}
+\end{equation}
+The objective is to minimize cumulative regret  \ref{eq:regret} relative to the best fixed policy:
+\begin{equation}
+R_T = \max_{\pi \in \Pi} \mathbb{E} \left[ \sum_{t=1}^{T} \left( r_t(X_t, \pi(X_t)) - r_t(X_t, A_t) \right) \right]
+\label{eq:linexp3_regret}
+\end{equation}
+where \(\Pi\) is the set of all deterministic policies which map contexts to actions.
+
+LINEXP3 is parameterized by a learning rate \(\eta > 0\), an exploration parameter \(\gamma \in (0,1)\), and a context covariance matrix \(\Sigma \in \mathbb{R}^{d \times d}\). The context covariance matrix \(\Sigma = \mathbb{E} [X_t X_t^\top]\) represents the second-moment matrix (which measures how the components of a vector vary together) of the context vectors, capturing the shape of the context distribution. It is estimated in practice using a running average: 
+\[
+\hat{\Sigma}_t = \frac{1}{t} \sum_{s=1}^t X_s X_s^\top,
+\]
+with the covariance matrix used for updates. The reward estimate in the Realizable Estimator (REALLINEXP3) is then updated as:
+\begin{equation}
+\hat{\theta}{t,a} = \mathbb{I}{A_t = a} \cdot \hat{\Sigma}{t,a}^+ X_t \cdot r_t(X_t, A_t)
+\label{eq:theta_estimate}
+\end{equation}
+
+
+The weight updates, probability computations, and reward estimations follow:
+
+\begin{algorithm} [H]
+\caption{\textbf{LINEXP3: Linear Contextual EXP3 Algorithm}}
+\label{alg:LINEXP3}
+\textbf{Input:} Learning rate \(\eta\), exploration parameter \(\gamma\), context covariance matrix \(\Sigma\) 
+\textbf{Initialization:} \( \hat{\theta}_{0,a} = 0 \) for all \( a \in \mathcal{A} \)
+\begin{algorithmic}[1]
+\For{$t = 1, 2, \dots, T$}
+    \State \( w_t(a) = \exp\left(-\eta \sum_{s=0}^{t-1} \langle X_t, \hat{\theta}_{s, a} \rangle \right) \) for all \( a \in \mathcal{A} \);
+    \State \( \pi_t(a \mid X_t) = (1 - \gamma) \frac{w_t(a)}{\sum_{a' \in \mathcal{A}} w_t(a')} + \frac{\gamma}{K} \) for all \( a \in \mathcal{A} \);
+    \State Sample action \( A_t \sim \pi_t(\cdot \mid X_t) \);
+    \State Observe reward \( r_t(X_t, A_t) = \langle X_t, \theta_{t, A_t} \rangle \);
+    \For{$a \in \mathcal{A}$}
+        \State Use the Realizable Estimator: \( \hat{\theta}_{t,a} = \frac{\mathbb{I}\{A_t = a\} \cdot r_t(X_t, A_t)}{\pi_t(a \mid X_t)} \);
+        \State \( \hat{\Sigma}_{t+1, a} = \frac{1}{t} \sum_{s=1}^t X_s X_s^\top \);
+    \EndFor
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+
+
+\subsection{The Realizable Estimator (REALLINEXP3)}
+In the Realizable Estimator (REALLINEXP3), reward is assumed to be exactly linear, and the update relies on an estimated covariance matrix using Matrix Geometric Resampling (MGR). The estimate is updated as:
+\[
+\hat{\theta}_{t,a} = \mathbb{I}\{A_t = a\} \cdot \hat{\Sigma}_{t,a}^+ X_t \cdot r_t(X_t, A_t) ,
+\]
+where \(\hat{\Sigma}_{t,a}^+\) is the pseudo-inverse of the estimated covariance matrix for action \(a\) \citep{neu2020linear}.
+
+The importance sampling approach handles the partial feedback problem, as the learner observes the reward for only the chosen action. The importance-weighted estimator ensures unbiased estimation by normalizing observed rewards by the action probabilities.
+
+\subsection{Regret Bounds}
+Under the exact linear reward assumption, REALLINEXP3 achieves the optimal regret:
+\[
+O\left(\sqrt{KdT \log K}\right).
+\]
+\citep{neu2020linear}.
+
+So far, this section has explored EXP3, EXP3E, and LinEXP3, all foundational algorithms in multi-armed bandits. We see that each algorithm addresses (or does not address) regret and ATE. However, none of them use both regret \textit{and} ATE. Specifically, LinEXP3, which operates for a contextual bandit setting, does not use ATE. Thus, its decision-making does not compare courses of action, which is important in many cases as discussed in Section \ref{sec:algorithm}. We aim to address this functionality gap in our model.
+
+
+\subsection{Reward Function Estimators}
+\textcolor{cyan}{Alec: up to now, all the previous algorithmic machinery development was constructive, so that we could eventually present our new algorith LinEXP3E. However, it does not seem like proper pseudo-code for this algorithm is written up. We need to add that as a proper pseudo-code so that we can contrast with the earlier variants. Eventually for a paper submission, much of the constructive machinery will be omitted and we will concentrate much more heavily on the new algorithm}
+Our implementation combines the LINEXP3 and EXP3E algorithms for a contextual bandit setting with the goal of estimating individual arm rewards alongside pairwise Average Treatment Effects (ATEs) \ref{eq:ate}. We introduce LinEXP3E, a realizable variant of LINEXP3 that incorporates linear reward modeling, importance weighting, and matrix geometric resampling.
+
+At each round, a context vector $x_t \in \mathbb{R}^d$ is sampled and the arm selection policy $\pi_t(a)$ is computed using the softmax-style exponential weighting scheme provided in LinEXP3. Weights are calculated as:
+
+\[w_t(X_t,a) = \exp\left(-\eta \sum_{s=0}^{t-1} \langle X_t, \hat{\theta}_{s, a} \rangle \right) \] where $\eta$ is the learning rate. The policy is then defined using these weights with a softmax-style normalization with $\gamma$ smoothing:
+    \[
+  \pi_t(a \mid X_t) = (1 - \gamma) \frac{w_t(a)}{\sum_{a' \in \mathcal{A}} w_t(a')} + \frac{\gamma}{K} 
+    \]
+    where $\gamma$ is an exploration parameter.
+    
+    
+    Upon selecting an arm and receiving a reward, we update the arm's reward estimator $\hat{\theta}_a$ with an estimator of the inverse covariance matrix using Matrix Geometric Resampling (MGR). MGR estimates the covariance structure over the context space and incorporates it into the reward estimate.
+
+We then scale each reward by the inverse of its selection probability:
+    \[
+    \hat{r}^{\text{IPW}}_t(a) = \frac{\langle x_t, \hat{\theta}_a \rangle}{\pi_t(a)}
+    \]
+    This allows us to compute unbiased estimates of pairwise ATEs \ref{eq:ate} even when only one action is observed per round.
+
+
+For each pair of arms $(a, b)$, we compute the empirical ATE as the running difference in their IPW-adjusted rewards:
+    \[
+    \hat{\tau}_{a,b}(t) = \frac{1}{t} \sum_{s=1}^t \left( \hat{r}^{\text{IPW}}_s(a) - \hat{r}^{\text{IPW}}_s(b) \right)
+    \]
+The code is implemented in Python using NumPy for efficient vector operations and matplotlib for visualization.

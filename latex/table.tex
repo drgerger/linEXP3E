@@ -1,0 +1,45 @@
+\documentclass[12pt]{article}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{amssymb}
+\usepackage{float}
+\usepackage{indentfirst,xcolor}
+\usepackage[round, authoryear]{natbib}
+\usepackage{enumitem}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\begin{document}
+
+\begin{table}
+    \centering
+    \begin{tabular}{lcccc}
+         \toprule
+         \textbf{Description} & \textbf{EXP3}  &\textbf{EXP3E}& \textbf{EXP4} & \textbf{LinEXP3} \\
+         \midrule
+         Number of arms & \( K \)  &\( K \) & \( K \) & \( K \) \\
+         Time horizon & \( T \)  &\( T \) & \( T \) & \( T \) \\
+         Weight of arm \( i \) at time \( t \) & \( w_i(t) \)  & \( w_i(t) \) & \( w_i(t) \) & - \\
+         Probability of selecting arm \( i \) at time \( t \) & \( p_i(t) \)  &\( \pi_t(a) \)& \( P_t(a) \) & \( \pi_t(a \mid X_t) \) \\
+         Reward observed for arm \( i \) at time \( t \) & \( x_i(t) \) &\( R_i(t) \)& \( x_t(a) \) & \( \ell_t(X_t, A_t) \) \\
+         Estimated reward for arm \( i \) at time \( t \) & \( \hat{x}_i(t) \)&\( \hat{R}_i(t) \)& \( \hat{x}_{t, a} \) & - \\
+         Exploration parameter & \( \gamma \)  &\( \gamma \) & \( \gamma \) & \( \gamma \) \\
+         Exploration Mechanism & - & \( \alpha \) & - & - \\
+         Arm chosen at time \( t \) & \( a_t \)&\( A_t \) & \( A_t \) & \( A_t \) \\
+         Model parameter in LinEXP3 & - & - & - & \( \theta_{t,a} \) \\
+         Cumulative Regret & \( R_T \) & \( R_T \) & \( R_T \) & \( R_T \) \\
+         Error in Estimating ATE & - & \( e_T \) & - & - \\
+         Confidence Level Parameter & - & \( \delta \) & - & - \\
+         True Mean Reward of Arm \( a \) & - & \( \mu_a \) & - & - \\
+         Context vector for arm \( a \) & - & - & - & \( X_t \) \\
+         Estimated parameter vector & - & - & - & \( \hat{\theta}_{t,a} \) \\
+         Covariance matrix & - & - & - & \( \Sigma \) \\
+         Importance Weighting Factor & - & \( \frac{R_t}{\pi_t(a)} \mathbf{1}\{A_t = a\} \) & \( \frac{\mathbb{I}(A_t = a)}{P_t(a) + \gamma}(1 - X_t) \) & \( \frac{\mathbb{I}\{A_t = a\}}{\pi_t(a \mid X_t)} \Sigma^{-1} X_t \ell_t(X_t, A_t) \) \\
+         \bottomrule
+    \end{tabular}
+    \caption{Key Variables in EXP3, EXP3E, EXP4, and LinEXP3 Algorithms}
+    \label{tab:variables}
+\end{table}
+
+\end{document}
