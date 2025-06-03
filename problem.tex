@@ -1,0 +1,49 @@
+\section{Problem Formulation}\label{sec:problem}
+
+The multi-armed bandits (MAB) framework is a fundamental model for sequential decision-making. Initially introduced as a methodology for adapting treatment allocations in medical trials, MAB seeks to balance exploration and exploitation across uncertainty. \citep{agrawal2013thompson}, \citep{lattimore2020bandit} Today, multi-armed bandits have a range of applications including medical trials and recommendation systems. We begin by introducing the stochastic and adversarial multi-armed bandit frameworks, defining our notation, and establishing two performance metrics -- \textit{cumulative regret} and \textit{Average Treatment Effect (ATE)}. These underpinnings motivate the need for a new variant that bridges these performance metrics in the linear contextual setting, which we will develop in later sections. 
+
+In the stochastic multi-armed bandit problem, a learner sequentially selects an arm (action) from a set of \textit{N} arms, then receives a stochastic reward from the chosen arm. The learner's goal is to balance exploration and exploitation; in other words, finding the optimal ratio between trying different arms and selecting the empirically superior arm.
+
+We consider a stochastic multi-armed bandit setting with a set of arms representing the action set \(\mathit{A} = \{1, \dots, \mathit{K}\}\) where \(\mathit{K}\) is the total number of arms. At each time step \(t\), the learner selects an arm \(a_t\in A\) and the environment reveals a reward function \(r_t: A \to \mathbb{R}\). The reward \(r_t(a_t)\) is drawn from a fixed but unknown distribution with mean \(\mu_a\) for each arm \(a\). A stochastic MAB instance is defined by \( \upsilon = (P_1, \dots, P_K) \) where \(P_i\) is the reward distribution of arm \(i\) \citep{simchilevi2023adaptive}. The learner's goal at each time step \(T\) is to select the optimal arm, thus maximizing reward.
+
+Regret measures the difference between the total expected reward obtained under the optimal policy and the total expected reward collected by the learner over all rounds. In stochastic settings, the best-in-hindsight comparator is: \(a^* = \arg\max_{a \in A} \mathbb{E}[r_t | a] = \arg\max_{a \in A} \mu_a. \) The cumulative regret after \(T\) rounds is then defined:
+\begin{equation}
+\label{eq:regret}
+\text{Regret}(T) = \sum_{t=1}^T \left(\mu_{a^*} - r_t\right),
+\end{equation}
+Adversarial or worst-case regret is defined in environments where rewards are not assumed to be i.i.d.; instead, they may be chosen adversarially. Still, the goal is to minimize the regret relative to the best fixed arm in hindsight. In stochastic settings, the regret scales as \(O(\log T)\). In adversarial settings, the regret scales as \(O(\sqrt{T})\) \citep{auer2002exp3}.
+
+The Average Treatment Effect (ATE) in the MAB setting measures the difference in expected reward between two arms. Given arms \(i, j \in A\), the ATE is defined:
+\begin{equation}
+\label{eq:ate}
+\text{ATE} = \Delta^{(i,j)} := \mu_i - \mu_j\forall i \neq j \in [K],
+\end{equation}. Therefore, when \( K = 2\), one arm is the control and one arm is the treatment of interest, and \(\Delta^{(1,2)}\) is the ATE \citep{simchilevi2023adaptive}.
+\textcolor{cyan}{Alec:
+\begin{itemize}
+    \item everywhere in section 2 where we mention regret or ATE, we should include an equation reference. add ATE as a display equation. No need to define regret multiple times -- just refer to it later. Also, anytime you refer to a specific regret result, clarify which specific Theorem and page number it is coming from.
+\item use the equation environment, e.g.,  \begin{equation}\label{eq:pythagorean}
+    a^2+b^2=c^2
+\end{equation} for all display equations, and use \ref{eq:pythagorean} to refer to equations
+%
+\item skip commented out lines between mathematical expressions, equations, figures, algorithm pseudo-code, etc. to make latex code more readable
+%
+\item at the beginning of each section, explain what is the purpose of the section. at the end of the section, remind me what the section accomplished, and preview what is to come. explain how what comes next is logistically related to what came before. include section labels, e.g., mentioning Section \ref{sec:problem}, in such discussions.
+%
+\item underscore that the contextual extension of EXP3E is the goal of this technical development in Section \ref{sec:problem}, and clarify that we build up the machinery for that with introducing EXP3 first, then EXP3E, then linear EXP3.
+%%
+\item define the numerical setup at the beginning of Section \ref{sec:experiments}
+%
+\item What open directions/extensions do you see as a result of this exercise? One obvious extension in my mind is to switch from the IPW estimator of the reward to the A2IPW -- check equation (2) in \url{https://arxiv.org/abs/2502.04673}. I think we should develop this extension after the previous list of revision items is complete.
+%
+\end{itemize}
+%
+}
+Best arm identification (BAI) focuses on selecting the arm with the highest expected reward and minimal error probability. The goal is to identify the best arm \(a^*:a^* = \text{argmax}_{a \in \mathcal{A}}\mu_{a}\). For stochastic bandits, each \(r_t\) is assumed to come from a distribution with a fixed mean \(\mu_a\). Thus, the best-in-hindsight used to evaluate regret is: \[a_T =\text{argmax}\sum_{t=1}^T \mathbb{E}[r_t]\]
+
+Regret has historically been the primary performance measure for bandit algorithms, while ATE is more common in causal inference or experimentation settings \citep{lattimore2020bandit}. To go beyond regret minimization and understand algorithmic tradeoffs in practical deployment, we study how well bandit algorithms can simultaneously minimize regret and estimate pairwise ATE in a contextual setting. In real-world systems, like recommender systems or clinical trials, accurately estimating the relative benefit of one course of action over another is as critical as selecting the best one. In this paper, we propose a new variant that evaluates ATE estimation alongside regret in a realizable linear contextual bandit environment, which we call LinEXP3.
+
+The ultimate goal of our technical development is to extend the EXP3E algorithm, which was originally defined in a non-contextual setting, to the linear contextual bandit environment. To accomplish this, we first introduce the foundational EXP3 algorithm, essentially the basis for exploration in adversarial settings. Next, we present EXP3E, which augments EXP3 with an ATE-aware exploration mechanism that balances both regret minimization and treatment effect estimation. We then discuss LinEXP3, which adapts EXP3 to leverage contextual information in a realizable linear reward setting. These three algorithms--EXP3, EXP3E, and LinEXP3--collectively provide the scaffolding for our algorithm, LinEXP3E. LinEXP3E combines the structure of linear reward models with the ATE-sensitive exploration of EXP3E.
+
+Our experiments empirically compare ATE convergence with and without Inverse Propensity Weighting (IPW), showing that IPW improves the consistency of ATE estimates over time. As Figures 2 and 3 illustrate, ATE estimates with IPW converge to stable values across all arm pairs, while estimates without IPW remain noisy and biased due to uneven arm selection. Figure 1 shows that while both versions of LinEXP3E learn to increase average reward over time, only the IPW variant achieves both lower regret \textit{and} reliable ATE inference. These results highlight a core tradeoff in the bandit setting: reward maximization alone does not guarantee good treatment effect estimation. As mentioned, LinEXP3E aims to balance this tradeoff by tracking both regret and ATE.
+
+Our paper is structured as follows. We first introduce the foundational EXP3 algorithm, which uses exponential weighting to balance exploration and exploitation \citep{auer2002exp3}. Then, we introduce two key diverging descendants of EXP3: EXP3E and LinEXP3. EXP3E extends EXP3 with the introduction of ATE estimation as a measure alongside regret minimization \citep{simchilevi2023adaptive}, while LinEXP3 extends EXP3 to the linear contextual setting \citep{neu2020linear}. Next, we present our contribution, LinEXP3E, which unifies these variants by incorporating the ATE-aware exploration of EXP3E into the linear contextual framework of LinEXP3. We then demonstrate the performance of LinEXP3E in a contextual bandit environment with 5 arms, and present our empirical findings with and without IPW.
